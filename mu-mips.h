@@ -46,12 +46,16 @@ typedef struct CPU_State_Struct {
 } CPU_State;
 
 typedef struct CPU_Pipeline_Reg_Struct{
-	uint32_t PC;
+	uint32_t PC;	
 	uint32_t IR;
 	uint32_t A;
 	uint32_t B;
+	uint32_t HI;
+	uint32_t LO;
+	uint32_t SYS;
 	uint32_t imm;
 	uint32_t ALUOutput;
+	uint32_t ALUOutput2;
 	uint32_t LMD;
 	
 } CPU_Pipeline_Reg;
@@ -62,44 +66,23 @@ typedef struct CPU_Pipeline_Reg_Struct{
 
 CPU_State CURRENT_STATE, NEXT_STATE;
 int RUN_FLAG;	/* run flag*/
-uint32_t ID_PC;
-uint32_t ID_IF_PC;
-uint32_t EX_offset;
-uint32_t EX_MEM_rd;
-uint32_t MEM_WB_rd;
-uint32_t FW_Mem;
-uint32_t FW_Exe;
-uint32_t WB_Value;
-uint32_t offset_value;
-int stallflag = 0;
-uint32_t D_rs;
-uint32_t D_rt;
-uint32_t rd1;
-uint32_t rdd;
-int ENABLE_FORWARDING=0;
-int zero;
-int FW_LW=0;
-int A=0;
-int B=0;
-int sh=0;
-int sh_A=0;
-int sh_B=0;
-int p=0;
-int p1=0;
-int be, bnq;
-int aa;
+int ENABLE_FORWARDING;						//Forwarding Flag
+int ForwardA;
+int ForwardB;
 uint32_t INSTRUCTION_COUNT;
 uint32_t CYCLE_COUNT;
 uint32_t PROGRAM_SIZE; /*in words*/
+int ctrlHzrd = 0;
+int jumpStall =0;
 
 
 /***************************************************************/
 /* Pipeline Registers.                                                                                                        */
 /***************************************************************/
 CPU_Pipeline_Reg ID_IF;
-CPU_Pipeline_Reg IF_EX;
-CPU_Pipeline_Reg EX_MEM;
-CPU_Pipeline_Reg MEM_WB;
+CPU_Pipeline_Reg EX_ID;
+CPU_Pipeline_Reg MEM_EX;
+CPU_Pipeline_Reg WB_MEM;
 
 char prog_file[32];
 
@@ -128,4 +111,4 @@ void IF();/*IMPLEMENT THIS*/
 void show_pipeline();/*IMPLEMENT THIS*/
 void initialize();
 void print_program(); /*IMPLEMENT THIS*/
-
+void print_instruction(uint32_t addr);
