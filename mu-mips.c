@@ -340,14 +340,14 @@ void WB()
 		return;
 	}
 	
-	if(WB_MEM.IR == 0 && WB_MEM.PC == 0 && WB_MEM.SYS == 0)
+	if(WB_MEM.IR == 0 && WB_MEM.PC == 0 && WB_MEM.SYSCALL == 0)
 	{
-		printf("BUBBLE\n");
+		printf("STALL\n");
 		return;
 	}
 
 	print_instruction(WB_MEM.PC);
-	uint32_t op_code = (WB_MEM.IR & 0xFC000000) >> 26;
+	uint32_t opcode = (WB_MEM.IR & 0xFC000000) >> 26;
 	uint32_t function = (WB_MEM.IR & 0x3F);
 	uint32_t rd = (0xF800 & WB_MEM.IR) >> 11;
 	uint32_t rt = (0x1F0000 & WB_MEM.IR) >> 16;
@@ -356,12 +356,12 @@ void WB()
 /*	
 	printf("\n=================WB==============\n");
 	print_instruction(WB_MEM.PC);
-	printf("WB.SYS = %X\n", WB_MEM.SYS);
-	printf("WB op_code = %X\n", op_code);
+	printf("WB.SYSCALL = %X\n", WB_MEM.SYSCALL);
+	printf("WB opcode = %X\n", opcode);
 	printf("====================================");
 */	
 	
-	if (op_code == 0x00) {
+	if (opcode == 0x00) {
 		switch(function) {
 			case 0x00:		//SLL
 				NEXT_STATE.REGS[rd] = WB_MEM.ALUOutput;
@@ -373,7 +373,7 @@ void WB()
 				NEXT_STATE.REGS[rd] = WB_MEM.ALUOutput;
 				break;
 			case 0x0C:		//SYSCALL
-				if(WB_MEM.SYS == 0xA)
+				if(WB_MEM.SYSCALL == 0xA)
 				{
 					RUN_FLAG = FALSE;
 				} 
@@ -440,11 +440,14 @@ void WB()
 					NEXT_STATE.REGS[rd] = WB_MEM.ALUOutput;
 				}
 				break;
+            case 0x09:		//JALR
+				NEXT_STATE.REGS[rd] = WB_MEM.ALUOutput;
+				break;
 		}
 	}
 	// Regular opcode (I-Type)
 	else {
-		switch(op_code) {
+		switch(opcode) {
 			case 0x8:		//ADDI
 				NEXT_STATE.REGS[rt] = WB_MEM.ALUOutput;
 				break;
@@ -483,6 +486,9 @@ void WB()
 			case 0x23:		//LW
 				NEXT_STATE.REGS[rt] = WB_MEM.LMD;;
 				break;
+            case 0x3:		//JAL
+				NEXT_STATE.REGS[31] = WB_MEM.ALUOutput;
+				break;
 		}
 	}
 }	
@@ -492,7 +498,7 @@ void WB()
 /************************************************************/
 void MEM()
 {
-	if(CYCLE_COUNT < 4 || WB_MEM.SYS == 0xA)
+	if(CYCLE_COUNT < 4 || WB_MEM.SYSCALL == 0xA)
 	{
 		return;
 	}
@@ -501,19 +507,19 @@ void MEM()
 
 	WB_MEM.IR = MEM_EX.IR;
 	WB_MEM.PC = MEM_EX.PC;
-	WB_MEM.SYS = MEM_EX.SYS;
+	WB_MEM.SYSCALL = MEM_EX.SYSCALL;
 
 
-	uint32_t op_code = (MEM_EX.IR & 0xFC000000) >> 26;
+	uint32_t opcode = (MEM_EX.IR & 0xFC000000) >> 26;
+    uint32_t function = (MEM_EX.IR & 0x3F);
 	uint32_t WB_rd = (0xF800 & WB_MEM.IR) >> 11;
 	uint32_t MEM_rd = (0xF800 & MEM_EX.IR) >> 11;
 	uint32_t EX_rs = (0x3E00000 & EX_ID.IR) >> 21;
 	uint32_t EX_rt = (0x1F0000 & EX_ID.IR) >> 16;
-	uint32_t function = (MEM_EX.IR & 0x3F);
 
 	if(ENABLE_FORWARDING)
 	{
-		if(op_code == 0x29 || op_code == 0x2B || op_code == 0x28)
+		if(opcode == 0x29 || opcode == 0x2B || opcode == 0x28)
 		{
 			
 		}
@@ -536,17 +542,24 @@ void MEM()
 /*	
 	printf("\n===================MEM=================\n");
 	print_instruction(WB_MEM.PC);
-	printf("MEM.SYS = %X\n", WB_MEM.SYS);
-	printf("MEM op_code = %X\n", op_code);
+	printf("MEM.SYSCALL = %X\n", WB_MEM.SYSCALL);
+	printf("MEM opcode = %X\n", opcode);
 	printf("====================================\n");
 */
-	if (op_code == 0x00) {
+	if (opcode == 0x00) {
 		WB_MEM.ALUOutput = MEM_EX.ALUOutput;
 		WB_MEM.ALUOutput2 = MEM_EX.ALUOutput2;
+        switch(function) {
+			case 0x8:		//JR
+			case 0x9:		//JALR
+				controlHazard = 0;
+                jumpStall = 0;
+                break;
+        }
 	}
 	// Regular opcode (I-Type)
 	else {
-		switch(op_code) {
+		switch(opcode) {
 			case 0x8:		//ADDI
 				WB_MEM.ALUOutput = MEM_EX.ALUOutput;
 				break;
@@ -597,53 +610,16 @@ void MEM()
 			case 0x2B:		//SW
 				mem_write_32(MEM_EX.ALUOutput, MEM_EX.B);
 				break;
-		}
-	}
-	if (ctrlHzrd==3)
-	{
-		
-		if(MEM_EX.ALUOutput!=0 || op_code==0x3 || op_code == 0x2 || (op_code == 0 && function == 9) || (op_code == 0 && function == 8))
-		{
-			printf("Branch taken, flushed\n");
-			NEXT_STATE.PC=MEM_EX.ALUOutput;
-			ctrlHzrd=4;
-			ID_IF.PC=0;
-			ID_IF.IR=0;
-			ID_IF.A=0;
-			ID_IF.B=0;
-			ID_IF.imm=0;
-			ID_IF.ALUOutput=0;
-			ID_IF.ALUOutput2=0;
-			ID_IF.LMD=0;
-			EX_ID.PC=0;
-			EX_ID.IR=0;
-			EX_ID.A=0;
-			EX_ID.B=0;
-			EX_ID.imm=0;
-			EX_ID.ALUOutput=0;
-			EX_ID.ALUOutput2=0;
-			EX_ID.LMD=0;
-			MEM_EX.PC=0;
-			MEM_EX.IR=0;
-			MEM_EX.A=0;
-			MEM_EX.B=0;
-			MEM_EX.imm=0;
-			MEM_EX.ALUOutput=0;
-			MEM_EX.ALUOutput2=0;
-			MEM_EX.LMD=0;
-			WB_MEM.PC=0;
-			WB_MEM.IR=0;
-			WB_MEM.A=0;
-			WB_MEM.B=0;
-			WB_MEM.imm=0;
-			WB_MEM.ALUOutput=0;
-			WB_MEM.ALUOutput2=0;
-			WB_MEM.LMD=0;
-		}
-		else
-		{
-			ctrlHzrd=0;
-			printf("Branch not taken\n");
+            case 0x1:
+            case 0x2:
+            case 0x3:
+            case 0x4:
+            case 0x5:
+            case 0x6:
+            case 0x7:
+                controlHazard = 0;
+                jumpStall = 0;
+                break;
 		}
 	}
 }
@@ -653,13 +629,7 @@ void MEM()
 /************************************************************/
 void EX()
 {
-	if (ctrlHzrd==4)
-	{
-		printf("Skipping EX()\n");
-		return;
-	}
-	
-	if(CYCLE_COUNT < 3 || MEM_EX.SYS == 0xA)
+	if(CYCLE_COUNT < 3 || MEM_EX.SYSCALL == 0xA)
 	{
 		return;
 	}
@@ -668,20 +638,19 @@ void EX()
 
 	MEM_EX.IR = EX_ID.IR;
 	MEM_EX.PC = EX_ID.PC;
-	MEM_EX.SYS = EX_ID.SYS;
+	MEM_EX.SYSCALL = EX_ID.SYSCALL;
 
-	if(EX_ID.IR == 0 && EX_ID.PC == 0 && EX_ID.SYS == 0)
+	if(EX_ID.IR == 0 && EX_ID.PC == 0 && EX_ID.SYSCALL == 0)
 	{
 		//printf("EX STALL\n");
 		return;
 	}
 
 	
-	uint32_t op_code = (EX_ID.IR & 0xFC000000) >> 26;
+	uint32_t opcode = (EX_ID.IR & 0xFC000000) >> 26;
 	uint32_t function = (EX_ID.IR & 0x3F);
 	uint32_t shamt = (0x7C0 & EX_ID.IR) >> 6;
 	uint32_t sixteen_bit_mask = 0xFFFF;
-	uint32_t offset = (EX_ID.IR && sixteen_bit_mask);
 	uint32_t MEM_rd = (0xF800 & MEM_EX.IR) >> 11;
 	uint32_t EX_rs = (0x3E00000 & EX_ID.IR) >> 21;
 	uint32_t EX_rt = (0x1F0000 & EX_ID.IR) >> 16;
@@ -718,51 +687,30 @@ void EX()
 	{
 		EX_ID.IR = ID_IF.IR;
 		EX_ID.PC = ID_IF.PC;
-		EX_ID.SYS = ID_IF.SYS;
+		EX_ID.SYSCALL = ID_IF.SYSCALL;
 		MEM_rd = (0xF800 & MEM_EX.IR) >> 11;
 		EX_rs = (0x3E00000 & EX_ID.IR) >> 21;
 		EX_rt = (0x1F0000 & EX_ID.IR) >> 16;
-		if(op_code == 0x29 || op_code == 0x2B || op_code == 0x28)
+		if(opcode == 0x29 || opcode == 0x2B || opcode == 0x28)
 		{
 			
 		}
 		else
 		{
 
-			if(op_code != 0x00) 									//check for i-type
-			{
-				// Set rd to be equivalent to the rt logic
-				MEM_rd = (0x1F0000 & MEM_EX.IR) >> 16;
+			if(opcode != 0x00){
+				MEM_rd = (0x1F0000 & MEM_EX.IR) >> 16;}
 
-			}
+			if((MEM_rd != 0) && (MEM_rd == EX_rs)){
+				ForwardA = 10;}
 
-			if((MEM_rd != 0) && (MEM_rd == EX_rs))
-			{
+			if((MEM_rd != 0) && (MEM_rd == EX_rt)){
 				//print_instruction(MEM_EX.PC);
-				ForwardA = 10;
-				/*if(op_code == 0x20 || op_code == 0x21 || op_code == 0x23)
-				{
-					ForwardA = 11;
-				}*/
-			}
-
-			if((MEM_rd != 0) && (MEM_rd == EX_rt))
-			{
-				//print_instruction(MEM_EX.PC);
-				ForwardB = 10;
-			}
+				ForwardB = 10;}
 		}
 	}
 
-
-/*
-	printf("\n================EX===================\n");
-	print_instruction(MEM_EX.PC);
-	printf("EX_ID.SYS = %X\n", EX_ID.SYS);
-	printf("EX op_code = %X\n", op_code);
-	printf("====================================\n");
-*/
-	if (op_code == 0x00) {
+	if (opcode == 0x00) {
 		switch(function) {
 			case 0x00:		//SLL
 				MEM_EX.ALUOutput = EX_ID.B << shamt;
@@ -774,7 +722,7 @@ void EX()
 				MEM_EX.ALUOutput = EX_ID.B >> shamt;
 				break;
 			case 0x0C:		//SYSCALL
-				if(EX_ID.SYS == 0xA)
+				if(EX_ID.SYSCALL == 0xA)
 				{
 					MEM_EX.ALUOutput = 0xA;
 				} 
@@ -806,6 +754,9 @@ void EX()
 				MEM_EX.ALUOutput2 = EX_ID.A % EX_ID.B;
 				break;
 			case 0x1B:		//DIVU
+                if (EX_ID.B == 0){
+					int rt = ((0x1F0000 & MEM_EX.IR) >> 16);
+					EX_ID.B = NEXT_STATE.REGS[rt];}
 				MEM_EX.ALUOutput = EX_ID.A / EX_ID.B;
 				MEM_EX.ALUOutput2 = EX_ID.A % EX_ID.B;
 				break;
@@ -834,38 +785,32 @@ void EX()
 				MEM_EX.ALUOutput = ~(EX_ID.A | EX_ID.B);
 				break;
 			case 0x2A:		//SLT
-				if(EX_ID.A < EX_ID.B)
-				{
-					MEM_EX.ALUOutput = 0x00000001;
-				}
-				else
-				{
-					MEM_EX.ALUOutput = 0x00000000;
-				}
+				if(EX_ID.A < EX_ID.B){
+					MEM_EX.ALUOutput = 0x00000001;}
+				else{
+					MEM_EX.ALUOutput = 0x00000000;}
 				break;
-			
-			//Jump or Branches
-			case 0x9://JALR
-				NEXT_STATE.PC = CURRENT_STATE.REGS[EX_rs];
-				jumpStall=1;
+            case 0x08:		//JR
+				CURRENT_STATE.PC = EX_ID.A;
+                jumpStall = 1;
 				break;
-			case 0x8://JR
+			case 0x09:		//JALR
+				MEM_EX.ALUOutput = EX_ID.PC;
+				CURRENT_STATE.PC = EX_ID.A;
+                jumpStall = 1;
 				break;
 		}
 	} 
 	// Regular opcode (I-Type)
 	else {
-		switch(op_code) {
+		switch(opcode) {
 			case 0x8:		//ADDI
-				// make immediate sign extended
 				MEM_EX.ALUOutput = EX_ID.A + EX_ID.imm;
 				break;
 			case 0x9:		//ADDIU
-				// should be unsigned?
 				MEM_EX.ALUOutput = EX_ID.A + EX_ID.imm;
 				break;
 			case 0xC:		//ANDI
-				//NEXT_STATE.REGS[rt] = (0000000000000000 | (immediate & (EX_ID.A & sixteen_bit_mask)));
 				MEM_EX.ALUOutput = EX_ID.imm & EX_ID.A & sixteen_bit_mask;
 				break;
 			case 0xE:		//XORI
@@ -894,7 +839,7 @@ void EX()
 				MEM_EX.B = EX_ID.B;
 				break;
 			case 0xF:		//LUI
-				MEM_EX.ALUOutput = (EX_ID.imm << 16); // ?????????????
+				MEM_EX.ALUOutput = (EX_ID.imm << 16);
 				break;
 			case 0x23:		//LW
 				MEM_EX.ALUOutput = EX_ID.imm + EX_ID.A;
@@ -913,33 +858,64 @@ void EX()
 				MEM_EX.B = EX_ID.B;
 				break;
 				
-			//Jump and Branches
-			case 0x04://BEQ
-				MEM_EX.ALUOutput=0;
-				printf("RS = %x, RT = %x\n", CURRENT_STATE.REGS[EX_rs], CURRENT_STATE.REGS[EX_rt]);
-				if (CURRENT_STATE.REGS[EX_rs]-CURRENT_STATE.REGS[EX_rt]==0)
+			//Branches and Jumps
+			case 0x4://BEQ
+				if (EX_ID.A == EX_ID.B)
+                {
+					( (EX_ID.imm) > 0 ? (EX_ID.imm | 0xFFFF0000)<<2 : (EX_ID.imm & 0x0000FFFF)<<2);
+                    jumpStall = 1;
+                }
+				break;
+			case 0x1:
+				if (EX_ID.B == 1)
 				{
-					MEM_EX.ALUOutput = CURRENT_STATE.PC + ((offset & 0x8000) > 0 ? (offset | 0xFFFF0000)<<2 : (offset & 0x0000FFFF)<<2);
+					// BGEZ
+					if (((int32_t)EX_ID.A) >= 0)
+                    {
+						( (EX_ID.imm) > 0 ? (EX_ID.imm | 0xFFFF0000)<<2 : (EX_ID.imm & 0x0000FFFF)<<2);
+                        jumpStall = 1;
+                    }
+				} 
+				else if (EX_ID.B == 0) 
+				{
+					// BLTZ
+					if (((int32_t)EX_ID.A) < 0)
+                    {
+						( (EX_ID.imm) > 0 ? (EX_ID.imm | 0xFFFF0000)<<2 : (EX_ID.imm & 0x0000FFFF)<<2);
+                        jumpStall = 1;
+                    }
 				}
 				break;
-			case 0x05://BNE
-				break;	
-			case 0x06://BLTZ
-				break;	
-			case 0x07://BGTZ
+			case 0x7://BGTZ
+				if (((int32_t)EX_ID.A) > 0){
+					CURRENT_STATE.PC = EX_ID.PC + 
+					( (EX_ID.imm) > 0 ? (EX_ID.imm | 0xFFFF0000)<<2 : (EX_ID.imm & 0x0000FFFF)<<2);
+					jumpStall = 1;}
 				break;
-			case 0x01://BGEZ and BLEZ
+				
+			case 0x6://BLEZ
+				if (((int32_t)EX_ID.A) <= 0){
+					CURRENT_STATE.PC = EX_ID.PC + 
+					((EX_ID.imm) > 0 ? (EX_ID.imm | 0xFFFF0000)<<2 : (EX_ID.imm & 0x0000FFFF)<<2);
+					jumpStall = 1;}
 				break;
-			case 0x02://J
+			case 0x5://BNE
+				if (EX_ID.A != EX_ID.B){
+					CURRENT_STATE.PC = EX_ID.PC + 
+					( (EX_ID.imm) > 0 ? (EX_ID.imm | 0xFFFF0000)<<2 : (EX_ID.imm & 0x0000FFFF)<<2);
+					jumpStall = 1;}
 				break;
-			case 0x03://JAL
+				
+			case 0x2://J
+                jumpStall = 1;
+				CURRENT_STATE.PC = ((EX_ID.PC >> 28) << 28) + ((EX_ID.IR & 0x3FFFFFF) << 2);
 				break;
-			}
-	}
-	if(ctrlHzrd==2)
-	{
-		ctrlHzrd=1;
-		printf("detected branch or jump\n");
+				
+			case 0x3://JAL
+				CURRENT_STATE.PC = ((EX_ID.PC >> 28) << 28) + ((EX_ID.IR & 0x3FFFFFF) << 2);
+				MEM_EX.ALUOutput = EX_ID.PC;
+				break;
+		}
 	}
 }
 
@@ -948,26 +924,39 @@ void EX()
 /************************************************************/
 void ID()
 {
-	if (ctrlHzrd==1 || ctrlHzrd==4)
-	{
-		printf("skipping ID  ()\n");
-		return;
-	}
-	
-	if(CYCLE_COUNT < 2 || EX_ID.SYS == 0xA)
+	if(CYCLE_COUNT < 2 || EX_ID.SYSCALL == 0xA)
 	{
 		return;
 	}
 
 	int stallFlag = 0;
-	if(EX_ID.IR == 0 && EX_ID.PC == 0 && EX_ID.SYS == 0)
+	if(EX_ID.IR == 0 && EX_ID.PC == 0 && EX_ID.SYSCALL == 0)
 	{
 		stallFlag = 1;
 	}
 
+
 	EX_ID.IR = ID_IF.IR;
 	EX_ID.PC = ID_IF.PC;
-	EX_ID.SYS = ID_IF.SYS;
+	EX_ID.SYSCALL = ID_IF.SYSCALL;
+
+    if(controlHazard == 1)
+	{
+		EX_ID.IR = 0;
+		EX_ID.PC = 0;
+		EX_ID.SYSCALL = 0;
+	}
+
+    if (jumpStall == 1)
+    {
+        EX_ID.IR = 0;
+		EX_ID.PC = 0;
+		EX_ID.SYSCALL = 0;
+        return;
+    }
+
+
+	
 	uint32_t rs = (0x3E00000 & ID_IF.IR) >> 21;
 	uint32_t rt = (0x1F0000 & ID_IF.IR) >> 16;
 	uint32_t immediate = (0xFFFF & ID_IF.IR);
@@ -976,9 +965,9 @@ void ID()
 	EX_ID.HI = CURRENT_STATE.HI;
 	EX_ID.LO = CURRENT_STATE.LO;
 	EX_ID.imm = (uint32_t)((int16_t)immediate);
-	uint32_t op_code = (EX_ID.IR & 0xFC000000) >> 26;
+	uint32_t opcode = (EX_ID.IR & 0xFC000000) >> 26;
 
-	if (stallFlag == 1 || (ENABLE_FORWARDING && (op_code == 0x29 || op_code == 0x2B || op_code == 0x28)))
+	if (stallFlag == 1 || (ENABLE_FORWARDING && (opcode == 0x29 || opcode == 0x2B || opcode == 0x28)))
 	{
 		EX_ID.A = NEXT_STATE.REGS[rs];
 		EX_ID.B = NEXT_STATE.REGS[rt];
@@ -989,46 +978,34 @@ void ID()
 	uint32_t EX_rs = (0x3E00000 & EX_ID.IR) >> 21;
 	uint32_t EX_rt = (0x1F0000 & EX_ID.IR) >> 16;
 	uint32_t function = (EX_ID.IR & 0x3F);
-	uint32_t MEM_op_code = (MEM_EX.IR & 0xFC000000) >> 26;
-	uint32_t WB_op_code = (WB_MEM.IR & 0xFC000000) >> 26;
-	
-	
-	
-	if(op_code == 0x3 ||op_code == 0x2 ||op_code == 0x4 ||op_code == 0x5 ||op_code == 0x6 
-	||op_code == 0x7|| (op_code == 0 && function == 9) || (op_code == 0 && function == 8)||op_code == 0x1)
-	{
-		if(stallFlag!=1)
-		{
-			ctrlHzrd = 2;
-		}
-	}
-	
+	uint32_t MEM_opcode = (MEM_EX.IR & 0xFC000000) >> 26;
+	uint32_t WB_opcode = (WB_MEM.IR & 0xFC000000) >> 26;
 	
 
-	if((!ENABLE_FORWARDING) && MEM_op_code == 0x00)
+	if((!ENABLE_FORWARDING) && MEM_opcode == 0x00)
 	{
-		if(!(MEM_op_code == 0x29 || MEM_op_code == 0x2B || MEM_op_code == 0x28))
+		if(!(MEM_opcode == 0x29 || MEM_opcode == 0x2B || MEM_opcode == 0x28))
 		{
 			if((MEM_rd != 0) && (MEM_rd == EX_rs))
 			{
 				//print_instruction(EX_ID.PC);
 				EX_ID.IR = 0;
 				EX_ID.PC = 0;
-				EX_ID.SYS = 0;
+				EX_ID.SYSCALL = 0;
 			}
 			if((MEM_rd != 0) && (MEM_rd == EX_rt))
 			{
 				//print_instruction(EX_ID.PC);
 				EX_ID.IR = 0;
 				EX_ID.PC = 0;
-				EX_ID.SYS = 0;
+				EX_ID.SYSCALL = 0;
 			}
 		}
 	}
-	else if((!ENABLE_FORWARDING) || (MEM_op_code == 0x20 || MEM_op_code == 0x21 || MEM_op_code == 0x23))
+	else if((!ENABLE_FORWARDING) || (MEM_opcode == 0x20 || MEM_opcode == 0x21 || MEM_opcode == 0x23))
 	{
 		MEM_rd = (0x1F0000 & MEM_EX.IR) >> 16;
-		switch(MEM_op_code) {
+		switch(MEM_opcode) {
 			case 0x8:		//ADDI
 			case 0x9:		//ADDIU
 			case 0xC:		//ANDI
@@ -1039,14 +1016,14 @@ void ID()
 			case 0x21:		//LH
 			case 0xF:		//LUI
 			case 0x23:		//LW
-				if(!(MEM_op_code == 0x29 || MEM_op_code == 0x2B || MEM_op_code == 0x28))
+				if(!(MEM_opcode == 0x29 || MEM_opcode == 0x2B || MEM_opcode == 0x28))
 				{
 					if((MEM_rd != 0) && (MEM_rd == EX_rs))
 					{
 						//print_instruction(EX_ID.PC);
 						EX_ID.IR = 0;
 						EX_ID.PC = 0;
-						EX_ID.SYS = 0;
+						EX_ID.SYSCALL = 0;
 					}
 				}
 				break;
@@ -1058,44 +1035,44 @@ void ID()
 					//print_instruction(EX_ID.PC);
 					EX_ID.IR = 0;
 					EX_ID.PC = 0;
-					EX_ID.SYS = 0;
+					EX_ID.SYSCALL = 0;
 				}
 				if((MEM_rd != 0) && (MEM_rd == EX_rt))
 				{
 					//print_instruction(EX_ID.PC);
 					EX_ID.IR = 0;
 					EX_ID.PC = 0;
-					EX_ID.SYS = 0;
+					EX_ID.SYSCALL = 0;
 				}
 				break;
 		}
 	}
 
-	if(((!ENABLE_FORWARDING) || (WB_op_code == 0xF)) && WB_op_code == 0x00) 
+	if(((!ENABLE_FORWARDING) || (WB_opcode == 0xF)) && WB_opcode == 0x00) 
 	{
-		if(!(WB_op_code == 0x29 || WB_op_code == 0x2B || WB_op_code == 0x28))
+		if(!(WB_opcode == 0x29 || WB_opcode == 0x2B || WB_opcode == 0x28))
 		{
-			if((WB_rd != 0) && (WB_rd == EX_rs))
+			if((WB_rd != 0) && (WB_rd == EX_rs))                        //
 			{
-				//print_instruction(EX_ID.PC);
 				EX_ID.IR = 0;
 				EX_ID.PC = 0;
-				EX_ID.SYS = 0;
+				EX_ID.SYSCALL = 0;
+				//print_instruction(EX_ID.PC);
 			}
 
 			if((WB_rd != 0) && (WB_rd == EX_rt))
 			{
-				//print_instruction(EX_ID.PC);
 				EX_ID.IR = 0;
 				EX_ID.PC = 0;
-				EX_ID.SYS = 0;
+				EX_ID.SYSCALL = 0;
+				//print_instruction(EX_ID.PC);
 			}
 		}
 	}
-	else if((!ENABLE_FORWARDING) || (WB_op_code == 0xF))
+	else if((!ENABLE_FORWARDING) || (WB_opcode == 0xF))
 	{
 		WB_rd = (0x1F0000 & WB_MEM.IR) >> 16;
-		switch(WB_op_code) {
+		switch(WB_opcode) {
 			case 0x8:		//ADDI
 			case 0x9:		//ADDIU
 			case 0xC:		//ANDI
@@ -1106,14 +1083,14 @@ void ID()
 			case 0x21:		//LH
 			case 0xF:		//LUI
 			case 0x23:		//LW
-				if(!(WB_op_code == 0x29 || WB_op_code == 0x2B || WB_op_code == 0x28))
+				if(!(WB_opcode == 0x29 || WB_opcode == 0x2B || WB_opcode == 0x28))
 				{
 					if((WB_rd != 0) && (WB_rd == EX_rs))
 					{
-						//print_instruction(EX_ID.PC);
 						EX_ID.IR = 0;
 						EX_ID.PC = 0;
-						EX_ID.SYS = 0;
+						EX_ID.SYSCALL = 0;
+						//print_instruction(EX_ID.PC);
 					}
 				}
 				break;
@@ -1122,18 +1099,18 @@ void ID()
 			case 0x2B:		//SW
 				if((WB_rd != 0) && (WB_rd == EX_rs))
 				{
-					//print_instruction(EX_ID.PC);
 					EX_ID.IR = 0;
 					EX_ID.PC = 0;
-					EX_ID.SYS = 0;
+					EX_ID.SYSCALL = 0;
+					//print_instruction(EX_ID.PC);
 				}
 
 				if((WB_rd != 0) && (WB_rd == EX_rt))
 				{
-					//print_instruction(EX_ID.PC);
 					EX_ID.IR = 0;
 					EX_ID.PC = 0;
-					EX_ID.SYS = 0;
+					EX_ID.SYSCALL = 0;
+					//print_instruction(EX_ID.PC);
 				}
 				break;
 		}
@@ -1143,47 +1120,57 @@ void ID()
 	{
 		MEM_rd = (0x1F0000 & MEM_EX.IR) >> 16;
 		WB_rd = (0x1F0000 & WB_MEM.IR) >> 16;
-		switch (op_code)
+		switch (opcode)
 		{
 			case 0x29:		//SH
 			case 0x28:		//SB
 			case 0x2B:		//SW
 				if((MEM_rd != 0) && (MEM_rd == EX_rs))
 				{
-					//print_instruction(EX_ID.PC);
 					EX_ID.IR = 0;
 					EX_ID.PC = 0;
-					EX_ID.SYS = 0;
+					EX_ID.SYSCALL = 0;
+					//print_instruction(EX_ID.PC);
 				}
 				if((MEM_rd != 0) && (MEM_rd == EX_rt))
 				{
-					//print_instruction(EX_ID.PC);
 					EX_ID.IR = 0;
 					EX_ID.PC = 0;
-					EX_ID.SYS = 0;
+					EX_ID.SYSCALL = 0;
+					//print_instruction(EX_ID.PC);
 				}	
 
 				if((WB_rd != 0) && (WB_rd == EX_rs))
 				{
-					//print_instruction(EX_ID.PC);
 					EX_ID.IR = 0;
 					EX_ID.PC = 0;
-					EX_ID.SYS = 0;
+					EX_ID.SYSCALL = 0;
+					//print_instruction(EX_ID.PC);
+
 				}
 
 				if((WB_rd != 0) && (WB_rd == EX_rt))
 				{
-					//print_instruction(EX_ID.PC);
 					EX_ID.IR = 0;
 					EX_ID.PC = 0;
-					EX_ID.SYS = 0;
+					EX_ID.SYSCALL = 0;
+					//print_instruction(EX_ID.PC);
 				}		
 				break;
 		}
 	}
 
-	if (op_code == 0x00 && function == 0x0C)
-		EX_ID.SYS = CURRENT_STATE.REGS[2];
+    opcode = (EX_ID.IR & 0xFC000000) >> 26;
+	function = (EX_ID.IR & 0x3F);
+
+	if(opcode == 0x3 ||opcode == 0x2 ||opcode == 0x4 ||opcode == 0x5 ||opcode == 0x6 
+	||opcode == 0x7|| (opcode == 0 && function == 9) || (opcode == 0 && function == 8)||opcode == 0x1)
+	{
+			controlHazard = 1;
+	}
+
+	if (opcode == 0x00 && function == 0x0C)
+		EX_ID.SYSCALL = CURRENT_STATE.REGS[2];
 }
 
 /************************************************************/
@@ -1191,34 +1178,20 @@ void ID()
 /************************************************************/
 void IF()
 {
-	if (ctrlHzrd==4)
-	{
-		ctrlHzrd=0;
-	}
-	if (ctrlHzrd==1)
-	{
-		printf("skipping IF()\n");
-		ctrlHzrd=3;
-		return;
-	}
-
-	if(CYCLE_COUNT < 1 || ID_IF.SYS == 0xA || ((EX_ID.IR == 0 && EX_ID.PC == 0 && EX_ID.SYS == 0) && CYCLE_COUNT > 4))
+	if(CYCLE_COUNT < 1 || ID_IF.SYSCALL == 0xA || ((EX_ID.IR == 0 && EX_ID.PC == 0 && EX_ID.SYSCALL == 0) && CYCLE_COUNT > 2))
 	{
 		return;
 	}
-	
-	
 
 	ID_IF.IR = mem_read_32(CURRENT_STATE.PC);
 	ID_IF.PC = CURRENT_STATE.PC;
 	NEXT_STATE.PC = CURRENT_STATE.PC + 4;
 	
-
-	uint32_t op_code = (ID_IF.IR & 0xFC000000) >> 26;
+	uint32_t opcode = (ID_IF.IR & 0xFC000000) >> 26;
 	uint32_t function = (ID_IF.IR & 0x3F);
 	
-	if (op_code == 0x00 && function == 0x0C)
-		ID_IF.SYS = 0xA;
+	if (opcode == 0x00 && function == 0x0C)
+		ID_IF.SYSCALL = 0xA;
 }
 
 
@@ -1249,23 +1222,22 @@ void print_program(){
 
 void print_instruction(uint32_t addr){
 	/*IMPLEMENT THIS*/
-	uint32_t current_instruction_decimal = mem_read_32(addr);
-	uint32_t op_code_mask = 0xFC000000;
-	uint32_t op_code = (current_instruction_decimal & op_code_mask) >> 26;
+	uint32_t current_instruction = mem_read_32(addr);
+	uint32_t opcode = (current_instruction & 0xFC000000) >> 26;
 
 	// Other masks
 	uint32_t rs_mask = 0x3E00000, rt_mask = 0x1F0000, immediate_mask = 0xFFFF, rd_mask = 0xF800, shamt_mask = 0x7C0, funct_mask = 0x3F, offset_mask = 0x3FFFFFF;
-	uint32_t rs = (rs_mask & current_instruction_decimal) >> 21;
-	uint32_t rt = (rt_mask & current_instruction_decimal) >> 16;
-	uint32_t immediate = (immediate_mask & current_instruction_decimal);
-	uint32_t rd = (rd_mask & current_instruction_decimal) >> 11;
-	uint32_t shamt = (shamt_mask & current_instruction_decimal) >> 6;
-	uint32_t function = (funct_mask & current_instruction_decimal);
-	uint32_t offset = (offset_mask & current_instruction_decimal);
+	uint32_t rs = (rs_mask & current_instruction) >> 21;
+	uint32_t rt = (rt_mask & current_instruction) >> 16;
+	uint32_t immediate = (immediate_mask & current_instruction);
+	uint32_t rd = (rd_mask & current_instruction) >> 11;
+	uint32_t shamt = (shamt_mask & current_instruction) >> 6;
+	uint32_t function = (funct_mask & current_instruction);
+	uint32_t offset = (offset_mask & current_instruction);
 
 	
 	// Function opcode (R-Type)
-	if (op_code == 0x00) {
+	if (opcode == 0x00) {
 		switch(function) {
 			case 0x00:		//SLL
 				printf("SLL $%d, $%d, 0x%x\n", rd, rt, shamt);
@@ -1340,7 +1312,7 @@ void print_instruction(uint32_t addr){
 	} 
 	// Regular opcode (I-Type)
 	else {
-		switch(op_code) {
+		switch(opcode) {
 			case 0x8:		//ADDI
 				// make immediate sign extended
 				printf("ADDI $%d, $%d, 0x%x\n", rt, rs, immediate);

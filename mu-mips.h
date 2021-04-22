@@ -52,7 +52,7 @@ typedef struct CPU_Pipeline_Reg_Struct{
 	uint32_t B;
 	uint32_t HI;
 	uint32_t LO;
-	uint32_t SYS;
+	uint32_t SYSCALL;
 	uint32_t imm;
 	uint32_t ALUOutput;
 	uint32_t ALUOutput2;
@@ -69,11 +69,11 @@ int RUN_FLAG;	/* run flag*/
 int ENABLE_FORWARDING;						//Forwarding Flag
 int ForwardA;
 int ForwardB;
+int controlHazard = 0;
+int jumpStall = 0;
 uint32_t INSTRUCTION_COUNT;
 uint32_t CYCLE_COUNT;
 uint32_t PROGRAM_SIZE; /*in words*/
-int ctrlHzrd = 0;
-int jumpStall =0;
 
 
 /***************************************************************/
